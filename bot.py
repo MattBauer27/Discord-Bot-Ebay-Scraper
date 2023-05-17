@@ -1,3 +1,4 @@
+from discord.ext import tasks
 import os
 from dotenv import load_dotenv
 import discord
@@ -16,6 +17,7 @@ bot = commands.Bot(command_prefix='!', intents=intent)
 
 search_terms = set()
 online_channel_id = int(os.getenv('CHANNEL_ID'))
+sent_links = set()  # store the links of the items already sent
 
 
 @bot.event
@@ -23,6 +25,7 @@ async def on_ready():
     online_channel = bot.get_channel(online_channel_id)
     await online_channel.send(f'{bot.user} has connected to Discord!')
     print(f'{bot.user} has connected to Discord!')
+    scrape.start()  # start the scraping task when the bot is ready
 
 
 @bot.command(name='add')
@@ -50,8 +53,10 @@ async def list_terms(ctx):
         await ctx.send(f"Current search terms: {terms}")
 
 
-@bot.command(name='scrape')
-async def scrape(ctx):
+@tasks.loop(hours=1)
+async def scrape():
+    channel = bot.get_channel(online_channel_id)
+    print(f"Scraping with search terms: {search_terms}")
     for term in search_terms:
         term_url = term.replace(' ', '+')
         url = f'https://www.ebay.com/sch/i.html?_nkw={term_url}&_sacat=0'
@@ -78,9 +83,16 @@ async def scrape(ctx):
                 price = item.find('span', {'class': 's-item__price'})
                 link = item.find('a', {'class': 's-item__link'})
                 if title and price and link:
-                    await ctx.send(f"{title.text}\n{price.text}\n{link['href']}")
+                    if link['href'] not in sent_links:
+                        sent_links.add(link['href'])
+                        await channel.send(f"{title.text}\n{price.text}\n{link['href']}")
         else:
-            await ctx.send(f"No items found for search term: {term}")
+            await channel.send(f"No items found for search term: {term}")
 
+
+@bot.command(name='manual_scrape')
+async def manual_scrape(ctx):
+    await ctx.send("Running manual scrape...")
+    await scrape()
 
 bot.run(TOKEN)
